@@ -1,0 +1,28 @@
+DATA
+MAIL FROM: <brandon@cs>
+MAIL FROM: <another@cs>
+RCPT TO: <deven@cs>
+RCPT TO: <jim@cs.cd.uned.asf>
+DATA
+This was a triumph.
+I'm making a note here: 
+HUGE SUCCESS.
+It's hard to overstate my satisfaction.
+
+.
+MAIL FROM: <second_account@another.domain>
+RCPT TA: <thisshould.fail>
+RCPT TO: <deven@cs>
+DOTA
+DATA
+Did you like the song?
+.
+MAIL FROM: <brandon@cs>
+RCPT TO: <jim@cs.cs.uned.asf>
+RCPT TO: < anothre.bad@cs>
+RCPT TO: <asno.asdf@cs>
+DATA
+ASFD
+ASFD
+a
+.

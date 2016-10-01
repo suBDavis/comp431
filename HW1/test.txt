@@ -1,0 +1,2 @@
+MAIL FROM: asdfgasdf
+MAIL   FROM:   <asfas@asf.com>
