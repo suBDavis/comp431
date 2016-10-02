@@ -145,6 +145,7 @@ class SMTPStateMachine:
     """
 
     def __init__(self):
+        self.mode = "server"
         self.inf = None
         self.to_list = []
         self.mail_from = None
@@ -165,7 +166,9 @@ class SMTPStateMachine:
                 # DON'T ECHO THE FILE
             else:
                 command = self.read_line()
-                print(command)
+                
+                if self.mode == "server":
+                    print(command)
 
             # Replace all whitespace runs with a single space
             command_trimmed = ' '.join(command.split())
@@ -220,6 +223,7 @@ class SMTPStateMachine:
             return commands.MAIL_FROM, parse_mailbox_cmd(commands.MAIL_FROM, cmd)
 
         elif cmd.lower().startswith(commands.DATA.lower()):
+            # DATA
             try:
                 assert(commands.check_equal(cmd.rstrip(), commands.DATA))
                 return commands.DATA, None
@@ -227,22 +231,28 @@ class SMTPStateMachine:
                 raise SyntaxException("DATA command malformed")
 
         elif cmd.startswith(commands.CLIENT_FROM):
+            # From:
             return commands.CLIENT_FROM, parse_mailbox_cmd(commands.CLIENT_FROM, cmd)
 
         elif cmd.startswith(commands.CLIENT_TO):
+            # To:
             return commands.CLIENT_TO, parse_mailbox_cmd(commands.CLIENT_TO, cmd)
 
         elif cmd.lower().startswith(success.OK_CODE.lower()):
+            # 250
             return success.OK_CODE, cmd
 
         elif cmd.lower().startswith(success.START_DATA_CODE.lower()):
+            # 354
             return success.START_DATA_CODE, cmd
 
         elif re.match(r'^\d\d\d', cmd):
-            #Match a three digit number, and return that number as the status
+            # DDD
+            # Match a three digit number, and return that number as the status
             return cmd[:3], cmd
 
         else:
+            # Something else
             return commands.UNKNOWN, cmd
 
     def read_line(self):
@@ -481,6 +491,7 @@ def relay(file):
     """
     smtpcsm = SMTPClientStateMachine()
     smtpcsm.inf = file
+    smtpcsm.mode = "client"
     smtpcsm.enter_mail_from()
 
 def serve():
@@ -489,6 +500,7 @@ def serve():
     """
     while True:
         smtpssm = SMTPServerStateMachine()
+        smtpssm.mode = "server"
         smtpssm.enter_mail_from()
 
 
