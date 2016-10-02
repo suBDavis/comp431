@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 # -----------------
-# Comp431
+# Comp431 FALL 2016
 # Brandon Davis
 # Homework 3: SMTP2
 # -----------------
@@ -19,12 +19,15 @@ AT = '@'
 # Exception Classes
 # -----------------
 
+# FOR MAL-FORMED COMMANDS
 class CommandException(Exception):
     pass
 
+# FOR CORRECT COMMANDS WITH MAL-FORMED ARGS
 class SyntaxException(Exception):
     pass
 
+# FOR CORRECT COMMANDS AND ARGS, OUT OF PLACE
 class OrderException(Exception):
     pass
 
@@ -73,10 +76,6 @@ class success:
 def log(string, stderr=False):
 
     if sys.version_info >= (3,0):
-        # if stderr:
-        #     print(string, file=sys.stderr)
-        # else:   
-        #     print(string)
         print("Python3 Not supported")
     
     else:
@@ -88,53 +87,39 @@ def log(string, stderr=False):
 def parse_path(reverse_path):
     assert(reverse_path[0] == '<')
     assert(reverse_path[-1] == '>')
-
     assert(reverse_path[1] != ' ')
     assert(reverse_path[-2] != ' ')
-    
     return reverse_path[1:-1]
 
 def parse_mailbox(mailbox): 
-
     assert('@' in mailbox)
     assert(len(mailbox.split('@')) == 2)
-
     parse_list = mailbox.split('@')
-
     assert(len(parse_list[0]) >= 1)
     assert(len(parse_list[1]) >= 1)
-
     return parse_list[0], parse_list[1]
 
 def parse_local_part(local_part):
-
     excluded_char_list = SPECIAL + WHITESPACE
     for excluded_char in excluded_char_list:
         assert(excluded_char not in local_part)
 
     # Verify the string was ASCII
     assert(len(local_part) == len(local_part.encode()))
-
     return local_part
 
 def parse_domain(domain):
-
     element_list = domain.split('.')
-    
     for element in element_list:
         assert(len(element)>=2)
-    
     return element_list
 
 def parse_element(element):
-
     element_pattern = re.compile('^[A-Za-z]+[A-Za-z1-9]+$')
     assert(re.match(element_pattern, element))
-
     return element
 
 def parse_mailbox_cmd(cmd_header, cmd):
-    
     try:
         reverse_path = cmd[ len(cmd_header) : ].strip()
         mailbox = parse_path(reverse_path)
@@ -142,22 +127,24 @@ def parse_mailbox_cmd(cmd_header, cmd):
         valid_local_part = parse_local_part(local_part)
         element_list = parse_domain(domain)
         element_list = [parse_element(element) for element in element_list]
-
         return mailbox
     except:
         raise SyntaxException("Syntax malformed")
-
-def parse_code(line):
-    pass
 
 # -----------------
 # Parent State Machine Logic
 # -----------------
 
 class SMTPStateMachine:
+    """
+    Contains:
+        wait_for()  # returns desired command from file/stdin
+        parse_cmd() # returns parsed command text
+        read_line() # reads line from stdin
+        read_file() # reads line from file.
+    """
 
     def __init__(self):
-        self.input_filename = None
         self.inf = None
         self.to_list = []
         self.mail_from = None
@@ -175,10 +162,10 @@ class SMTPStateMachine:
             
             if fromfile:
                 command = self.read_file()
+                # DON'T ECHO THE FILE
             else:
                 command = self.read_line()
-            
-            print(command)
+                print(command)
 
             # Replace all whitespace runs with a single space
             command_trimmed = ' '.join(command.split())
@@ -201,10 +188,10 @@ class SMTPStateMachine:
             if return_anything: 
                 # If the caller will accept anything.
                 if ctype == commands.UNKNOWN: 
-                    # RETURN whitespace-preserved command
+                    # RETURN whitespace-preserved command IF command type is unknown
                     return ctype, command 
                 else: 
-                    # RETURN whitespace-stripped command
+                    # RETURN whitespace-stripped command IF cmd was recognized
                     return ctype, cdata 
             else: 
                 # Caller asked for specific commands.
@@ -212,7 +199,7 @@ class SMTPStateMachine:
                     # Correct formed command found.  Return
                     return ctype, cdata
                 else: 
-                    # Caller did not get required command
+                    # Caller did not get any specified command
                     log(error.BAD_ORDER)
                     continue
 
@@ -259,7 +246,6 @@ class SMTPStateMachine:
             return commands.UNKNOWN, cmd
 
     def read_line(self):
-
         command = sys.stdin.readline()
 
         if command == '':  # EOF Read
@@ -271,11 +257,6 @@ class SMTPStateMachine:
         return command
 
     def read_file(self):
-        """
-        Read a line from self.input_file
-        Return the line.
-        """
-
         if self.inf:
             line = self.inf.readline()
             if line:
@@ -308,7 +289,7 @@ class SMTPClientStateMachine(SMTPStateMachine):
             command_type, mailbox = self.wait_for([commands.CLIENT_FROM], fromfile=True)
         
         self.emit_from(mailbox)
-        self.wait_for_OK()
+        self.wait_for_status(success.OK_CODE)
 
         self.enter_mail_to()
 
@@ -316,7 +297,7 @@ class SMTPClientStateMachine(SMTPStateMachine):
         
         command_type, mailbox = self.wait_for([commands.CLIENT_TO], fromfile=True)
         self.emit_to(mailbox)
-        self.wait_for_OK()
+        self.wait_for_status(success.OK_CODE)
 
         self.enter_mail_to_or_body()
 
@@ -326,7 +307,7 @@ class SMTPClientStateMachine(SMTPStateMachine):
 
         while command_type == commands.CLIENT_TO:
             self.emit_to(mailbox)
-            self.wait_for_OK()
+            self.wait_for_status(success.OK_CODE)
 
             command_type, mailbox = self.wait_for([], fromfile=True)
 
@@ -350,14 +331,8 @@ class SMTPClientStateMachine(SMTPStateMachine):
         # WRITE DATA CMD
         log(commands.DATA)
 
-        # WAIT FOR OK TO BEGIN DATA
-        response_type, response = self.wait_for([])
-        if response_type == success.START_DATA_CODE:
-            log(response, stderr=True)
-        else:
-            log(response, stderr=True)
-            log(commands.QUIT)
-            sys.exit(1)
+        # WAIT FOR BEGIN DATA
+        self.wait_for_status(success.START_DATA_CODE)
 
         # ALREADY HAVE FIRST DATA LINE
         data = first_line
@@ -378,13 +353,14 @@ class SMTPClientStateMachine(SMTPStateMachine):
         log(commands.END_DATA)
 
         # LISTEN FOR OK
-        self.wait_for_OK()
+        self.wait_for_status(success.OK_CODE)
 
         if not done:
             # BEGIN CYCLE AGAIN
             self.enter_mail_from(next_mailbox=data)
 
         else:
+            log(commands.QUIT)
             self.inf.close()
 
 
@@ -398,12 +374,12 @@ class SMTPClientStateMachine(SMTPStateMachine):
             to_cmd = commands.RCPT_TO,
             mailbox = mailbox)) 
 
-    def wait_for_OK(self):
+    def wait_for_status(self, status):
         """
         Terminate if something else is received.
         """
         response_type, response = self.wait_for([])
-        if response_type == success.OK_CODE:
+        if response_type == status:
             log(response, stderr=True)
         else:
             #handle bad response type
