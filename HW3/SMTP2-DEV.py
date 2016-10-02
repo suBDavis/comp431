@@ -77,7 +77,8 @@ def log(string, stderr=False):
         #     print(string, file=sys.stderr)
         # else:   
         #     print(string)
-        pass
+        print("Python3 Not supported")
+    
     else:
         if stderr:
             print >> sys.stderr, string
@@ -149,7 +150,6 @@ def parse_mailbox_cmd(cmd_header, cmd):
 def parse_code(line):
     pass
 
-
 # -----------------
 # Parent State Machine Logic
 # -----------------
@@ -157,12 +157,13 @@ def parse_code(line):
 class SMTPStateMachine:
 
     def __init__(self):
-        self.input_file = None
+        self.input_filename = None
+        self.inf = None
         self.to_list = []
         self.mail_from = None
         self.data_list = []
 
-    def wait_for(self, command_list, source=None):
+    def wait_for(self, command_list, fromfile=False):
         """
         Waits in a loop for the specified list of commands.
         If the list is empty, return anything.
@@ -172,7 +173,10 @@ class SMTPStateMachine:
 
         while True:
             
-            command = self.read_line()
+            if fromfile:
+                command = self.read_file()
+            else:
+                command = self.read_line()
             
             print(command)
 
@@ -183,6 +187,7 @@ class SMTPStateMachine:
                 ctype, cdata = self.parse_command(command_trimmed)
 
                 if ctype == commands.UNKNOWN and not return_anything:
+                    # If caller asked for a specifc command and no known command was found
                     raise CommandException("Command not recognized")
 
             except CommandException as e:
@@ -193,15 +198,21 @@ class SMTPStateMachine:
                 log(error.BAD_SYNTAX)
                 continue
 
-            if return_anything:
-                if ctype == commands.UNKNOWN:
-                    return ctype, command
-                else:
+            if return_anything: 
+                # If the caller will accept anything.
+                if ctype == commands.UNKNOWN: 
+                    # RETURN whitespace-preserved command
+                    return ctype, command 
+                else: 
+                    # RETURN whitespace-stripped command
+                    return ctype, cdata 
+            else: 
+                # Caller asked for specific commands.
+                if ctype in command_list: 
+                    # Correct formed command found.  Return
                     return ctype, cdata
-            else:         
-                if ctype in command_list:
-                    return ctype, cdata
-                else:
+                else: 
+                    # Caller did not get required command
                     log(error.BAD_ORDER)
                     continue
 
@@ -241,7 +252,7 @@ class SMTPStateMachine:
             return success.START_DATA_CODE, cmd
 
         elif re.match(r'^\d\d\d', cmd):
-            #Match a three digit number.
+            #Match a three digit number, and return that number as the status
             return cmd[:3], cmd
 
         else:
@@ -249,10 +260,7 @@ class SMTPStateMachine:
 
     def read_line(self):
 
-        if self.input_file:
-            pass
-        else:
-            command = sys.stdin.readline()
+        command = sys.stdin.readline()
 
         if command == '':  # EOF Read
             sys.exit(0)
@@ -261,6 +269,22 @@ class SMTPStateMachine:
         command = command[:-1]
 
         return command
+
+    def read_file(self):
+        """
+        Read a line from self.input_file
+        Return the line.
+        """
+
+        if self.inf:
+            line = self.inf.readline()
+            if line:
+                return line[:-1]
+            else:
+                return None
+        else:
+            self.inf = open(self.input_filename, 'r')
+            return self.read_data()
 
 # -----------------
 # Client State Machine Logic
@@ -275,15 +299,14 @@ class SMTPClientStateMachine(SMTPStateMachine):
         -> enter read data  ------------+ 
     """
     
-    def enter_mail_from(self, first_from=None):
+    def enter_mail_from(self, next_mailbox=None):
 
-        if first_from:
+        if next_mailbox:
             command_type = commands.CLIENT_FROM
-            mailbox = parse_mailbox_cmd(command_type, first_from)
+            mailbox = next_mailbox
         else:
-            command_type, mailbox = self.wait_for([commands.CLIENT_FROM])
+            command_type, mailbox = self.wait_for([commands.CLIENT_FROM], fromfile=True)
         
-        self.mail_from = mailbox
         self.emit_from(mailbox)
         self.wait_for_OK()
 
@@ -291,8 +314,7 @@ class SMTPClientStateMachine(SMTPStateMachine):
 
     def enter_mail_to(self):
         
-        command_type, mailbox = self.wait_for([commands.CLIENT_TO])
-        self.to_list.append(mailbox)
+        command_type, mailbox = self.wait_for([commands.CLIENT_TO], fromfile=True)
         self.emit_to(mailbox)
         self.wait_for_OK()
 
@@ -300,15 +322,13 @@ class SMTPClientStateMachine(SMTPStateMachine):
 
     def enter_mail_to_or_body(self):
         
-        command_type, mailbox = self.wait_for([])
+        command_type, mailbox = self.wait_for([], fromfile=True)
 
         while command_type == commands.CLIENT_TO:
-
-            self.to_list.append(mailbox)
             self.emit_to(mailbox)
             self.wait_for_OK()
 
-            command_type, mailbox = self.wait_for([])
+            command_type, mailbox = self.wait_for([], fromfile=True)
 
         # mailbox is now the first line of data!
         # verify mailbox is also not NULL or another "From"
@@ -324,6 +344,8 @@ class SMTPClientStateMachine(SMTPStateMachine):
             sys.exit(1)
 
     def enter_read_body(self, first_line):
+
+        done = False
 
         # WRITE DATA CMD
         log(commands.DATA)
@@ -342,19 +364,28 @@ class SMTPClientStateMachine(SMTPStateMachine):
         data_type = commands.UNKNOWN
 
         # READ EACH LINE OF DATA, and SEND IT
-        while data_type == commands.UNKNOWN:
-            self.data_list.append(data)
-            print(data)
-            data_type, data = self.wait_for([])
+        while not ( data_type == commands.CLIENT_FROM ):
+            log(data) # Strip the newline
+
+            try:
+                data = self.read_file()
+                data_type, data = self.parse_command(data)
+            except:
+                done = True
+                break
 
         # END WRITE DATA WITH A PERIOD
         log(commands.END_DATA)
 
-        # LISTEN FOR ACK
+        # LISTEN FOR OK
         self.wait_for_OK()
 
-        # BEGIN CYCLE AGAIN
-        self.enter_mail_from(first_from=data)
+        if not done:
+            # BEGIN CYCLE AGAIN
+            self.enter_mail_from(next_mailbox=data)
+
+        else:
+            self.inf.close()
 
 
     def emit_from(self, mailbox):
@@ -369,8 +400,7 @@ class SMTPClientStateMachine(SMTPStateMachine):
 
     def wait_for_OK(self):
         """
-        Returns 1 if OK received.
-        Otherwise, terminates
+        Terminate if something else is received.
         """
         response_type, response = self.wait_for([])
         if response_type == success.OK_CODE:
@@ -461,16 +491,20 @@ class SMTPServerStateMachine(SMTPStateMachine):
 # -----------------
 
 def get_args():
+    """
+    Create an argument parser.
+    """
     parser = argparse.ArgumentParser()
-    parser.add_argument("files", nargs='?', help="A mail file to read and relay.")
+    parser.add_argument("file", nargs='?', help="A mail file to read and relay.",  type=argparse.FileType('r'))
     args = parser.parse_args()
     return args
 
-def relay(file_list):
+def relay(file):
     """
     Run an SMTP client that opens files, and outputs the associated SMTP commands to a server.
     """
     smtpcsm = SMTPClientStateMachine()
+    smtpcsm.inf = file
     smtpcsm.enter_mail_from()
 
 def serve():
@@ -486,7 +520,7 @@ if __name__ == "__main__":
 
     args = get_args()
 
-    if args.files:
-        relay(args.files)
+    if args.file:
+        relay(args.file)
     else:
         serve()
