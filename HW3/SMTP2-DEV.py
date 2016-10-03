@@ -270,7 +270,10 @@ class SMTPStateMachine:
         if self.inf:
             line = self.inf.readline()
             if line:
-                return line[:-1]
+                if '\n' in line:
+                    return line[:-1]
+                else:
+                    return line
             else:
                 return None
         else:
@@ -312,29 +315,22 @@ class SMTPClientStateMachine(SMTPStateMachine):
         self.enter_mail_to_or_body()
 
     def enter_mail_to_or_body(self):
-        
+
         command_type, mailbox = self.wait_for([], fromfile=True)
 
         while command_type == commands.CLIENT_TO:
             self.emit_to(mailbox)
             self.wait_for_status(success.OK_CODE)
 
-            command_type, mailbox = self.wait_for([], fromfile=True)
+            try:
+                command_type, mailbox = self.wait_for([], fromfile=True)
+            except:
+                break
 
         # mailbox is now the first line of data!
-        # verify mailbox is also not NULL or another "From"
+        self.enter_read_body(mailbox, command_type)
 
-        if not command_type == commands.CLIENT_FROM \
-            and not mailbox == None:
-
-            self.enter_read_body(mailbox)
-
-        else:
-            log(mailbox, stderr=True)
-            log(commands.QUIT)
-            sys.exit(1)
-
-    def enter_read_body(self, first_line):
+    def enter_read_body(self, first_line, first_type):
 
         done = False
 
@@ -346,10 +342,10 @@ class SMTPClientStateMachine(SMTPStateMachine):
 
         # ALREADY HAVE FIRST DATA LINE
         data = first_line
-        data_type = commands.UNKNOWN
+        data_type = first_type
 
         # READ EACH LINE OF DATA, and SEND IT
-        while not ( data_type == commands.CLIENT_FROM ):
+        while not ( data_type == commands.CLIENT_FROM ) and data:
             log(data) # Strip the newline
 
             try:
@@ -359,13 +355,16 @@ class SMTPClientStateMachine(SMTPStateMachine):
                 done = True
                 break
 
+        if not data:
+            done = True
+
         # END WRITE DATA WITH A PERIOD
         log(commands.END_DATA)
 
         # LISTEN FOR OK
         self.wait_for_status(success.OK_CODE)
 
-        if not done:
+        if not done and data_type == commands.CLIENT_FROM:
             # BEGIN CYCLE AGAIN
             self.enter_mail_from(next_mailbox=data)
 
