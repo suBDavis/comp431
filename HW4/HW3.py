@@ -31,9 +31,6 @@ class SyntaxException(Exception):
 class OrderException(Exception):
     pass
 
-class EndOfFileException(Exception):
-    pass
-
 # -----------------
 # Enumerators
 # -----------------
@@ -118,7 +115,7 @@ def parse_domain(domain):
     return element_list
 
 def parse_element(element):
-    element_pattern = re.compile('^[A-Za-z]+[A-Za-z0-9]+$')
+    element_pattern = re.compile('^[A-Za-z]+[A-Za-z1-9]+$')
     assert(re.match(element_pattern, element))
     return element
 
@@ -154,7 +151,10 @@ class SMTPStateMachine:
         self.mail_from = None
         self.data_list = []
         if input_function:
-            self.input_function = f
+            print("HEYYY")
+            self.read = input_function
+        else:
+            self.read = read_line
 
     def wait_for(self, command_list, fromfile=False):
         """
@@ -167,13 +167,10 @@ class SMTPStateMachine:
         while True:
             
             if fromfile:
-                try:
-                    command = self.read_file()
-                except EndOfFileException as e:
-                    return None, None
+                command = self.read_file()
                 # DON'T ECHO THE FILE
             else:
-                command = self.read_line()
+                command = self.read(self)
                 
                 if self.mode == "server":
                     print(command)
@@ -226,11 +223,11 @@ class SMTPStateMachine:
             # RCPT TO
             return commands.RCPT_TO, parse_mailbox_cmd(commands.RCPT_TO, cmd)
 
-        elif cmd.startswith(commands.MAIL_FROM):
+        elif cmd.lower().startswith(commands.MAIL_FROM.lower()):
             # MAIL FROM
             return commands.MAIL_FROM, parse_mailbox_cmd(commands.MAIL_FROM, cmd)
 
-        elif cmd.startswith(commands.DATA):
+        elif cmd.lower().startswith(commands.DATA.lower()):
             # DATA
             try:
                 assert(commands.check_equal(cmd.rstrip(), commands.DATA))
@@ -262,8 +259,9 @@ class SMTPStateMachine:
         else:
             # Something else
             return commands.UNKNOWN, cmd
-  
-    def read_line(self):
+
+    @staticmethod
+    def read_line(caller):
         command = sys.stdin.readline()
 
         if command == '':  # EOF Read
@@ -278,9 +276,12 @@ class SMTPStateMachine:
         if self.inf:
             line = self.inf.readline()
             if line:
-                return line.replace('\n', '')
+                if '\n' in line:
+                    return line[:-1]
+                else:
+                    return line
             else:
-                raise EndOfFileException("Cannot read any more")
+                return None
         else:
             self.inf = open(self.input_filename, 'r')
             return self.read_data()
@@ -326,7 +327,11 @@ class SMTPClientStateMachine(SMTPStateMachine):
         while command_type == commands.CLIENT_TO:
             self.emit_to(mailbox)
             self.wait_for_status(success.OK_CODE)
-            command_type, mailbox = self.wait_for([], fromfile=True)
+
+            try:
+                command_type, mailbox = self.wait_for([], fromfile=True)
+            except:
+                break
 
         # mailbox is now the first line of data!
         self.enter_read_body(mailbox, command_type)
@@ -352,11 +357,8 @@ class SMTPClientStateMachine(SMTPStateMachine):
             try:
                 data = self.read_file()
                 data_type, data = self.parse_command(data)
-            except EndOfFileException as e:
+            except:
                 done = True
-                break
-            except Exception as e:
-                done=True
                 break
 
         if not data:
@@ -443,12 +445,12 @@ class SMTPServerStateMachine(SMTPStateMachine):
 
     def enter_read_data(self):
         
-        data = self.read_line()
+        data = self.read(self)
 
-        while data != commands.END_DATA:
+        while str(data) != commands.END_DATA:
             self.data_list.append(data)
-            print(data)
-            data = self.read_line()
+            print(data + " vs " + commands.END_DATA, data==commands.END_DATA)
+            data = self.read(self)
 
         # END read
         log(data) # Will be a period
